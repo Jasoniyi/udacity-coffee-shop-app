@@ -1,13 +1,22 @@
 import json
-from flask import request, _request_ctx_stack
+from marshal import load
+from xml.dom.domreg import well_known_implementations
+from flask import request, _request_ctx_stack, abort
 from functools import wraps
 from jose import jwt
 from urllib.request import urlopen
+from dotenv import load_dotenv
+import os
 
+# AUTH0_DOMAIN = 'udacity-fsnd.auth0.com'
+# ALGORITHMS = ['RS256']
+# API_AUDIENCE = 'dev'
 
-AUTH0_DOMAIN = 'udacity-fsnd.auth0.com'
+load_dotenv()
+
+AUTH0_DOMAIN = os.getenv('AUTH0_DOMAIN')
 ALGORITHMS = ['RS256']
-API_AUDIENCE = 'dev'
+API_AUDIENCE = os.getenv('API_AUDIENCE')
 
 ## AuthError Exception
 '''
@@ -31,7 +40,23 @@ class AuthError(Exception):
     return the token part of the header
 '''
 def get_token_auth_header():
-   raise Exception('Not Implemented')
+#    raise Exception('Not Implemented')
+    auth = request.headers['Authorization']
+
+#    split auth into bearer and token
+    header_parts = auth.split(' ')
+
+    if not auth:
+      abort(401)
+    if len(header_parts) !=2:
+      abort(401)
+
+#   validate bearer token
+    elif header_parts[0].lower() != 'bearer':
+        abort (401)
+
+    token = header_parts[1]
+    return token
 
 '''
 @TODO implement check_permissions(permission, payload) method
@@ -45,7 +70,14 @@ def get_token_auth_header():
     return true otherwise
 '''
 def check_permissions(permission, payload):
-    raise Exception('Not Implemented')
+    # raise Exception('Not Implemented')
+    if payload is not None:
+        abort(401)
+    if "permissions" not in payload:
+        abort(400)
+    if permission not in payload["permissions"]:
+        abort(403)
+    return True
 
 '''
 @TODO implement verify_decode_jwt(token) method
@@ -61,7 +93,63 @@ def check_permissions(permission, payload):
     !!NOTE urlopen has a common certificate error described here: https://stackoverflow.com/questions/50236117/scraping-ssl-certificate-verify-failed-error-for-http-en-wikipedia-org
 '''
 def verify_decode_jwt(token):
-    raise Exception('Not Implemented')
+    # raise Exception('Not Implemented')
+    jsonurl = urlopen(f'https://{AUTH0_DOMAIN}/.well_known/jwks.json')
+    jwks = json.loads(jsonurl.read())
+    unverified_header = jwt.get_unverified_header(token)
+    rsa_key = {}
+    if 'kid' not in unverified_header:
+        raise AuthError({
+            'code': 'invalid_header',
+            'description': 'Authorization malformed'
+        }, 401)
+
+    for key in jwks['keys']:
+        if key['kid'] == unverified_header['kid']:
+            rsa_key = {
+                'kty': key['kty'],
+                'kid': key['kid'],
+                'use': key['use'],
+                'n': key['n'],
+                'e': key['e']
+            }
+        
+    if rsa_key:
+        try:
+            payload = jwt.decode(
+                token,
+                rsa_key,
+                algorithms=ALGORITHMS,
+                audience=API_AUDIENCE,
+                issuer='https://' + AUTH0_DOMAIN + '/'
+            )
+
+            return payload
+
+        except jwt.ExpiredSignatureError:
+            raise AuthError({
+                'code': 'token_expired',
+                'description': 'Token expired'
+            }, 401)
+
+        except jwt.JWTClaimsError:
+            raise AuthError({
+                'code': 'invalid_claims',
+                'description': 'Incorrect claims. Please check the audience and the issurer.'
+            }, 400)
+
+        except Exception:
+            raise AuthError({
+                'code': 'invalid_header',
+                'description': 'Unable to parse authentification token'
+            }, 400)
+
+    raise AuthError({
+        'code': 'invalid_header',
+        'description': 'Unable to find the appropriate key'
+    }, 400)
+
+
 
 '''
 @TODO implement @requires_auth(permission) decorator method
